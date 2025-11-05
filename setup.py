@@ -12,7 +12,7 @@ long_description = readme_file.read_text(encoding='utf-8') if readme_file.exists
 setup(
     name='luckyIA',
     version='1.0.0',
-    description='Module IA Python pour la formation de modèles avec PyTorch à partir de données clients',
+    description='Python AI module for training models with PyTorch on client data',
     long_description=long_description,
     long_description_content_type='text/markdown',
     author='LuckyIA Team',

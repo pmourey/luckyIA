@@ -9,17 +9,20 @@ import torch.nn as nn
 class ClientModel(nn.Module):
     """Modèle de réseau de neurones pour les données clients"""
     
-    def __init__(self, input_dim, hidden_dims=[64, 32], output_dim=1, dropout_rate=0.2):
+    def __init__(self, input_dim, hidden_dims=None, output_dim=1, dropout_rate=0.2):
         """
         Initialise le modèle
         
         Args:
             input_dim: Dimension d'entrée (nombre de features)
-            hidden_dims: Liste des dimensions des couches cachées
+            hidden_dims: Liste des dimensions des couches cachées (défaut: [64, 32])
             output_dim: Dimension de sortie (nombre de classes ou valeurs à prédire)
             dropout_rate: Taux de dropout pour la régularisation
         """
         super(ClientModel, self).__init__()
+        
+        if hidden_dims is None:
+            hidden_dims = [64, 32]
         
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -73,16 +76,19 @@ class ClientModel(nn.Module):
 class ClientClassificationModel(ClientModel):
     """Modèle spécialisé pour la classification"""
     
-    def __init__(self, input_dim, hidden_dims=[64, 32], num_classes=2, dropout_rate=0.2):
+    def __init__(self, input_dim, hidden_dims=None, num_classes=2, dropout_rate=0.2):
         """
         Initialise le modèle de classification
         
         Args:
             input_dim: Dimension d'entrée
-            hidden_dims: Dimensions des couches cachées
+            hidden_dims: Dimensions des couches cachées (défaut: [64, 32])
             num_classes: Nombre de classes
             dropout_rate: Taux de dropout
         """
+        if hidden_dims is None:
+            hidden_dims = [64, 32]
+        
         super(ClientClassificationModel, self).__init__(
             input_dim, hidden_dims, num_classes, dropout_rate
         )
