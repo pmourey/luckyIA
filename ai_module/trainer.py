@@ -5,9 +5,16 @@ Module pour l'entraînement du modèle
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from tqdm import tqdm
 import numpy as np
 from pathlib import Path
+
+# Essayer d'importer tqdm mais fournir un fallback si absent
+try:
+    from tqdm import tqdm
+except Exception:
+    def tqdm(iterable, *args, **kwargs):
+        # fallback minimal: renvoyer l'itérable sans barre de progression
+        return iterable
 
 
 class ModelTrainer:
@@ -77,8 +84,8 @@ class ModelTrainer:
                 
                 train_loss += loss.item()
             
-            # Perte moyenne d'entraînement
-            avg_train_loss = train_loss / len(train_loader)
+            # Perte moyenne d'entraînement (protéger contre division par zéro)
+            avg_train_loss = train_loss / max(1, len(train_loader))
             self.train_losses.append(avg_train_loss)
             
             # Validation
@@ -124,8 +131,8 @@ class ModelTrainer:
                 loss = criterion(outputs, labels)
                 total_loss += loss.item()
         
-        avg_loss = total_loss / len(data_loader)
-        
+        avg_loss = total_loss / max(1, len(data_loader))
+
         if verbose:
             print(f'Evaluation Loss: {avg_loss:.4f}')
         
@@ -150,8 +157,9 @@ class ModelTrainer:
                 outputs = self.model(features)
                 predictions.append(outputs.cpu().numpy())
         
-        return np.vstack(predictions)
-    
+        # Si aucune prédiction, renvoyer un tableau vide
+        return np.vstack(predictions) if predictions else np.array([])
+
     def save_model(self, path):
         """
         Sauvegarde le modèle
@@ -174,7 +182,8 @@ class ModelTrainer:
         Args:
             path: Chemin du modèle
         """
-        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
+        # torch.load ne prend pas l'argument 'weights_only'; utiliser map_location uniquement
+        checkpoint = torch.load(path, map_location=self.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.train_losses = checkpoint.get('train_losses', [])
         self.val_losses = checkpoint.get('val_losses', [])

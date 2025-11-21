@@ -162,5 +162,9 @@ trainer.train(train_loader, test_loader, epochs=50)
 trainer.save_model('models/mon_modele.pth')
 """)
 
+# Archived example: prefer using ai_module.examples utilities instead
+# See ai_module/examples functions for generation, training and prediction helpers.
+# If you need this script, restore from git history.
+
 if __name__ == "__main__":
     main()

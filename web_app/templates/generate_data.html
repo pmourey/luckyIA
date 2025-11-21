@@ -1,0 +1,27 @@
+{% extends 'layout.html' %}
+
+{% block title %}Générer des données - LuckyIA{% endblock %}
+
+{% block content %}
+  <h1>Générer des données d'exemple</h1>
+
+  {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+  {% elif success %}
+    <div class="alert alert-success">Données générées: <strong>{{ csv_path }}</strong></div>
+  {% endif %}
+
+  <form method="post">
+    <div class="mb-3">
+      <label for="n_samples" class="form-label">Nombre d'échantillons</label>
+      <input type="number" class="form-control" id="n_samples" name="n_samples" value="1000">
+    </div>
+    <div class="mb-3">
+      <label for="random_seed" class="form-label">Seed (optionnel)</label>
+      <input type="number" class="form-control" id="random_seed" name="random_seed" value="42">
+    </div>
+    <button class="btn btn-primary" type="submit">Générer</button>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary">Retour</a>
+  </form>
+{% endblock %}
+

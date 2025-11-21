@@ -1,0 +1,26 @@
+{% extends 'layout.html' %}
+
+{% block title %}Générer des modèles - LuckyIA{% endblock %}
+
+{% block content %}
+  <h1>Générer des modèles de démonstration</h1>
+
+  {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+  {% elif success %}
+    <div class="alert alert-success">Modèles générés. Résultats:</div>
+    <pre>{{ results }}</pre>
+  {% endif %}
+
+  <form method="post">
+    <div class="mb-3">
+      <label for="model_type" class="form-label">Type (utilisé pour l'UI, la génération crée plusieurs modèles)</label>
+      <select class="form-select" id="model_type" name="model_type">
+        <option value="auto" selected>Auto (sklearn + PyTorch si disponible)</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" type="submit">Générer modèles</button>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary">Retour</a>
+  </form>
+{% endblock %}
+

@@ -61,7 +61,7 @@ Ce script va:
 - Charger les données clients
 - Prétraiter et normaliser les features
 - Créer un modèle de réseau de neurones
-- Entraîner le modèle pendant 50 époques
+- Entraîner le modèle pendant 50 *epoc*
 - Évaluer les performances
 - Sauvegarder le modèle dans `models/client_model.pth`
 
@@ -134,6 +134,23 @@ Le script `generate_sample_data.py` génère des données clients simulées avec
 - **depenses_mensuelles**: Dépenses mensuelles (500-8000)
 - **risque**: Variable cible - risque de défaut (0-1)
 
+### Détail de la colonne `risque`
+
+La colonne `risque` correspond à la variable cible (target) utilisée pour l'entraînement et l'évaluation des modèles. Voici les précisions importantes :
+
+- Rôle : indique le niveau de risque associé à un client (par ex. risque de défaut de paiement). Le modèle apprend à prédire `risque` à partir des features (age, revenu, anciennete, score_credit, depenses_mensuelles, ...).
+- Formats acceptés :
+  - Binaire (0 / 1) — classification binaire (1 = événement à risque). Utilisé avec des classifieurs (RandomForestClassifier, LogisticRegression, réseaux avec sortie sigmoïde).
+  - Probabilité (float entre 0.0 et 1.0) — sortie probabiliste. On évaluera la calibration et on appliquera un seuil pour la décision finale.
+  - Score continu (ex. 0..100) — possible mais nécessite normalisation/transformations selon l'objectif.
+- Dans l'UI / pipeline :
+  - Pour l'entraînement, le CSV doit contenir la colonne `risque` afin que le script d'entraînement puisse séparer target/features.
+  - Pour la prédiction (inférence), l'utilisateur final doit téléverser un CSV contenant uniquement les features (sans `risque`). Si la colonne `risque` est présente dans un CSV envoyé pour prédiction, l'application essaie de la détecter et de la retirer automatiquement (colonnes candidates détectées : `risque`, `target`, `label`, `Unnamed: 0`, `index`).
+- Bonnes pratiques :
+  - Stocker `risque` en numérique (int 0/1 pour classes, float pour probabilités).
+  - Vérifier les valeurs manquantes et appliquer une politique d'imputation ou de suppression.
+  - Si vous utilisez des probabilités, vérifier la calibration et choisir un seuil métier pour la conversion en classe.
+
 ## 🛠️ Technologies utilisées
 
 - **PyTorch**: Framework de deep learning
@@ -150,3 +167,56 @@ Ce projet est open source et disponible sous licence MIT.
 ## 👥 Contribution
 
 Les contributions sont les bienvenues! N'hésitez pas à ouvrir une issue ou une pull request.
+
+## 🕸️ Interface Web (Flask)
+
+Une application Flask minimale est fournie dans `web_app/` pour permettre à un utilisateur final de :
+- téléverser un fichier CSV client,
+- choisir un modèle parmi ceux présents dans le dossier `models/`,
+- lancer une prédiction et voir les résultats sous forme de tableau,
+- générer des données d'exemple et des modèles de démonstration depuis l'UI,
+- entraîner un modèle directement depuis un CSV uploadé.
+
+Commandes rapides :
+
+```bash
+# Démarrer l'application (depuis la racine du projet)
+cd web_app
+python app.py
+```
+
+URL par défaut : http://127.0.0.1:5000/
+
+Pages disponibles :
+- / : page d'accueil pour téléverser un CSV et choisir un modèle
+- /generate-data : générer et sauvegarder un CSV d'exemple
+- /generate-model : générer des modèles de démonstration (sklearn + PyTorch si disponible)
+- /train-model : téléverser un CSV et entraîner un modèle (sauvegardé dans `models/`)
+
+
+## 🧰 Utilitaires `ai_module.examples`
+
+Le package expose des utilitaires prêts à l'emploi pour la génération, l'entraînement et la prédiction. Exemple d'utilisation depuis Python :
+
+```python
+from ai_module import examples as ex
+
+# Générer des données clients synthétiques (sauvegarde par défaut dans data/raw/client_data.csv)
+ex.generate_sample_data(n_samples=1000, random_state=42)
+
+# Créer des modèles et un CSV d'entrée de démonstration (models/demo_sklearn.joblib, models/demo_torch.pt si torch disponible)
+res = ex.generate_demo_models()
+print(res)
+
+# Entraîner un modèle à partir d'un CSV
+res = ex.train_model_from_csv('data/raw/client_data.csv', target_column='risque', epochs=30)
+print('Model saved at', res['model_path'])
+
+# Faire une prédiction depuis Python
+out = ex.predict_from_csv('data/raw/client_data.csv', model_path='models/client_model.pth')
+print(out['metrics'])
+```
+
+Remarques importantes :
+- Certains utilitaires nécessitent `scikit-learn`, `joblib` et/ou `torch` : si ces paquets manquent, les fonctions feront des fallbacks (ou retourneront des messages d'erreur clairs). Installez-les via pip si nécessaire.
+- Pour PyTorch, suivez les instructions officielles si une roue binaire n'est pas disponible pour votre version de Python : https://pytorch.org

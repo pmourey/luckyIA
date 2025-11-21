@@ -1,0 +1,387 @@
+{% extends 'layout.html' %}
+
+{% block title %}Importer données client - LuckyIA{% endblock %}
+
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Charger les données client</h1>
+    <div>
+      <a class="btn btn-outline-secondary me-2" href="{{ url_for('generate_data') }}">Générer données</a>
+      <a class="btn btn-outline-secondary me-2" href="{{ url_for('generate_model') }}">Générer modèles</a>
+      <a class="btn btn-outline-secondary" href="{{ url_for('train_model') }}">Entraîner modèle</a>
+    </div>
+  </div>
+
+  <p>Choisissez un fichier CSV contenant les colonnes attendues par le modèle.</p>
+  <div class="row">
+    <div class="col-md-8">
+      <form id="predict-form" action="{{ url_for('predict') }}" method="post" enctype="multipart/form-data">
+        <div class="mb-3">
+          <label for="datafile" class="form-label">Fichier CSV</label>
+          <input class="form-control" type="file" id="datafile" name="datafile" accept=".csv" required>
+        </div>
+
+        <div class="mb-3">
+          <label for="model" class="form-label">Choisir un modèle</label>
+          <select class="form-select" id="model" name="model" required onchange="loadModelMeta()">
+            {% if models %}
+              {% for m in models %}
+                <option value="{{ m.name if m is mapping else m }}">{{ m.name if m is mapping else m }}</option>
+              {% endfor %}
+            {% else %}
+              <option disabled>Aucun modèle trouvé dans le dossier models/</option>
+            {% endif %}
+          </select>
+        </div>
+
+        <button class="btn btn-primary" type="submit">Exécuter</button>
+      </form>
+    </div>
+
+    <div class="col-md-4">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title">Meta du modèle sélectionné</h5>
+          <div id="model-meta">
+            <p><em>Sélectionnez un modèle pour voir ses métadonnées.</em></p>
+          </div>
+
+          <h6 class="mt-3">Mapping colonnes</h6>
+          <div class="mb-2">
+            <button id="load-csv-columns-btn" class="btn btn-sm btn-outline-primary">Charger colonnes depuis le CSV sélectionné</button>
+            <button id="autofill-mapping-btn" class="btn btn-sm btn-outline-secondary">Auto-fill mapping</button>
+          </div>
+
+          <div id="detected-target-alert" style="display:none; margin-bottom:10px;">
+            <div class="alert alert-warning alert-sm" role="alert">
+              <strong>Colonne cible détectée :</strong>
+              <span id="detected-target-names"></span>
+              <div class="mt-1 small">Cette (ces) colonne(s) seront supprimée(s) automatiquement pour la prédiction. Si vous souhaitez les conserver pour l'entraînement, utilisez la page d'entraînement.</div>
+              <div class="mt-1"><button id="dismiss-target-alert" class="btn btn-sm btn-outline-secondary">Masquer</button></div>
+            </div>
+          </div>
+
+          <form id="meta-form" method="post" action="{{ url_for('save_model_meta') }}">
+            <input type="hidden" name="model_name" id="meta-model-name">
+            <div id="mapping-fields"></div>
+
+            <!-- Preview area: hidden until user requests preview -->
+            <div id="mapping-preview" style="display:none; margin-top:10px;">
+              <h6>Aperçu du mapping</h6>
+              <div class="table-responsive">
+                <table class="table table-sm table-bordered" id="mapping-preview-table">
+                  <thead><tr><th>Colonne CSV</th><th>Feature cible</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <div class="d-flex gap-2">
+                <button id="confirm-save-btn" class="btn btn-sm btn-success">Confirmer et sauvegarder</button>
+                <button id="edit-mapping-btn" class="btn btn-sm btn-outline-secondary">Modifier mapping</button>
+              </div>
+            </div>
+
+            <div class="d-flex gap-2 mt-2">
+              <button id="save-meta-btn" class="btn btn-sm btn-success" type="button">Prévisualiser & sauvegarder (AJAX)</button>
+              <button id="save-meta-btn-fallback" class="btn btn-sm btn-secondary" type="submit">Sauvegarder (form)</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Utilitaire pour lire la première ligne (en-têtes) d'un fichier CSV côté client
+    function readCsvHeader(file) {
+      return new Promise((resolve, reject) => {
+        if (!file) return resolve([]);
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const txt = e.target.result;
+          const firstLine = txt.split(/\r?\n/)[0] || '';
+          // split by comma respecting simple quotes - basic
+          const cols = firstLine.split(',').map(c => c.replace(/^\s+|\s+$/g, '').replace(/^"|"$/g, ''));
+          resolve(cols.filter(c => c !== ''));
+        };
+        reader.onerror = function(err){ reject(err); };
+        // read up to a few KB to get header
+        const blob = file.slice(0, 65536);
+        reader.readAsText(blob);
+      });
+    }
+
+    async function loadModelMeta(){
+      const sel = document.getElementById('model');
+      const model = sel.value;
+      document.getElementById('meta-model-name').value = model;
+      const metaDiv = document.getElementById('model-meta');
+      const mappingDiv = document.getElementById('mapping-fields');
+      metaDiv.innerHTML = '<p>Chargement...</p>';
+      mappingDiv.innerHTML = '';
+      try{
+        const res = await fetch('/model-meta/' + encodeURIComponent(model));
+        if(!res.ok){
+          const txt = await res.text();
+          metaDiv.innerHTML = '<div class="text-danger">Erreur chargement meta: ' + txt + '</div>';
+          return;
+        }
+        const js = await res.json();
+        let html = '<dl class="row">';
+        html += '<dt class="col-sm-5">Source</dt><dd class="col-sm-7">' + (js.source || '') + '</dd>';
+        html += '<dt class="col-sm-5">Method</dt><dd class="col-sm-7">' + (js.method || '') + '</dd>';
+        html += '<dt class="col-sm-5">Expected dim</dt><dd class="col-sm-7">' + (js.expected_input_dim !== null ? js.expected_input_dim : '-') + '</dd>';
+        html += '<dt class="col-sm-5">Feature names</dt><dd class="col-sm-7">' + (js.feature_names ? js.feature_names.join(', ') : '-') + '</dd>';
+        html += '</dl>';
+        metaDiv.innerHTML = html;
+
+        // build mapping fields based on expected dim or existing features
+        const existing = js.feature_names || [];
+        const expected = js.expected_input_dim || existing.length || 0;
+        // create a placeholder for mapping widgets
+        mappingDiv.innerHTML = '';
+        for(let i=0;i<Math.max(existing.length, expected, 1); i++){
+          const val = existing[i] || '';
+          const idx = i;
+          const field = document.createElement('div');
+          field.className = 'mb-2';
+          field.innerHTML = '<label class="form-label">Feature ' + idx + '</label>' +
+                            '<input class="form-control feature-name-input" name="feature_' + idx + '" data-idx="' + idx + '" value="' + val + '">'+
+                            '<small class="form-text text-muted">Associer colonne CSV (après chargement):</small>' +
+                            '<select class="form-select csv-col-select" data-idx="' + idx + '"><option value="">-- non assigné --</option></select>';
+          mappingDiv.appendChild(field);
+        }
+
+      }catch(e){
+        metaDiv.innerHTML = '<div class="text-danger">Erreur: ' + e + '</div>';
+      }
+    }
+
+    // Charger les colonnes CSV depuis le fichier input et remplir les selects
+    async function loadCsvColumnsIntoSelects(){
+      const fileInput = document.getElementById('datafile');
+      const file = fileInput.files && fileInput.files[0];
+      if(!file){
+        alert('Aucun fichier CSV sélectionné.');
+        return;
+      }
+      const cols = await readCsvHeader(file);
+      window._lastCsvCols = cols || [];
+      if(!cols || cols.length === 0){
+        alert('Aucune colonne détectée dans le CSV.');
+        return;
+      }
+      // detect target-like columns and show alert
+      const lowerCols = cols.map(c=>c.toLowerCase());
+      const candidates = ['risque', 'target', 'label', 'unnamed: 0', 'index'];
+      const detected = [];
+      for(const cand of candidates){
+        const i = lowerCols.indexOf(cand);
+        if(i !== -1){ detected.push(cols[i]); }
+      }
+      const alertBox = document.getElementById('detected-target-alert');
+      const alertNames = document.getElementById('detected-target-names');
+      if(detected.length){
+        alertNames.textContent = detected.join(', ');
+        alertBox.style.display = 'block';
+      } else {
+        alertBox.style.display = 'none';
+      }
+
+      // populate each select
+      const selects = document.querySelectorAll('.csv-col-select');
+      selects.forEach(sel =>{
+        // remove old options except first
+        while(sel.options.length>1) sel.remove(1);
+        cols.forEach(c =>{
+          const opt = document.createElement('option');
+          opt.value = c; opt.text = c;
+          sel.appendChild(opt);
+        });
+      });
+    }
+
+    // Dismiss button for target alert
+    document.addEventListener('DOMContentLoaded', ()=>{
+      const dismiss = document.getElementById('dismiss-target-alert');
+      if(dismiss){
+        dismiss.addEventListener('click', (e)=>{ e.preventDefault(); document.getElementById('detected-target-alert').style.display='none'; });
+      }
+    });
+
+    // Heuristique simple d'auto-mapping : exact match (case-insensitive), substring, then positional
+    async function autofillMapping(){
+      // If mapping fields do not exist yet (user hasn't loaded model meta), create them
+      const mappingFields = document.getElementById('mapping-fields');
+      if(!mappingFields || mappingFields.children.length === 0){
+        // generate mapping fields by loading current model meta
+        try{
+          await loadModelMeta();
+        }catch(e){
+          console.debug('autofill: loadModelMeta failed', e);
+        }
+      }
+
+      // Ensure we have CSV columns: if not, try to load them via the helper which also populates selects
+      let cols = window._lastCsvCols || [];
+      if(!cols || cols.length === 0){
+        try{
+          await loadCsvColumnsIntoSelects();
+          cols = window._lastCsvCols || [];
+        }catch(e){
+          console.debug('autofill: loadCsvColumnsIntoSelects failed', e);
+          cols = [];
+        }
+      }
+
+      if(!cols || cols.length === 0){
+        alert('Aucune colonne CSV disponible. Chargez un fichier CSV ou utilisez "Charger colonnes".');
+        return;
+      }
+
+      const featureInputs = Array.from(document.querySelectorAll('.feature-name-input'));
+      const selects = Array.from(document.querySelectorAll('.csv-col-select'));
+
+      // populate selects if still empty
+      selects.forEach(sel => {
+        if(sel.options.length <= 1){
+          cols.forEach(c => {
+            const opt = document.createElement('option'); opt.value = c; opt.text = c; sel.appendChild(opt);
+          });
+        }
+      });
+
+      const colsLc = cols.map(c => c.toLowerCase());
+      selects.forEach(sel => sel.value = '');
+
+      featureInputs.forEach((inp, idx) =>{
+        const fnameRaw = (inp.value || '');
+        const fname = fnameRaw.trim().toLowerCase();
+        let found = -1;
+        if(fname){
+          found = colsLc.indexOf(fname);
+          if(found === -1){
+            found = colsLc.findIndex(c => c.includes(fname) || fname.includes(c));
+          }
+        }
+        // positional fallback if nothing matched or no feature name provided
+        if(found === -1 && idx < cols.length){
+          found = idx;
+        }
+        if(found !== -1){
+          const sel = document.querySelector('.csv-col-select[data-idx="'+idx+'"]');
+          if(sel){ sel.value = cols[found]; }
+        }
+      });
+    }
+
+    // Build a visual preview of the mapping; payload: {model_name, feature_names, column_to_feature}
+    function buildPreview(payload){
+      const tbody = document.querySelector('#mapping-preview-table tbody');
+      tbody.innerHTML = '';
+      const colsMap = payload.column_to_feature || {};
+      // Only show entries that have a CSV column mapped (skip unmapped feature-only rows)
+      const entries = Object.entries(colsMap).filter(([col, feat]) => col && col !== '-');
+      if(entries.length === 0){
+        const tr = document.createElement('tr');
+        const td = document.createElement('td'); td.setAttribute('colspan','2'); td.className = 'text-muted';
+        td.innerHTML = '<em>Aucun mapping de colonnes détecté.</em>';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+      } else {
+        for(const [col, feat] of entries){
+          const tr = document.createElement('tr');
+          const tdCol = document.createElement('td'); tdCol.textContent = col;
+          const tdFeat = document.createElement('td'); tdFeat.textContent = feat;
+          tr.appendChild(tdCol); tr.appendChild(tdFeat);
+          tbody.appendChild(tr);
+        }
+      }
+      // show preview panel
+      document.getElementById('mapping-preview').style.display = 'block';
+      // hide mapping fields to avoid accidental edits while previewing
+      document.getElementById('mapping-fields').style.display = 'none';
+    }
+
+    function hidePreview(){
+      document.getElementById('mapping-preview').style.display = 'none';
+      document.getElementById('mapping-fields').style.display = 'block';
+    }
+
+    // Gather mapping and show preview; on confirm the preview will be sent
+    async function showPreviewBeforeSave(){
+      const model = document.getElementById('model').value;
+      const featureInputs = Array.from(document.querySelectorAll('.feature-name-input'));
+      const feature_names = featureInputs.map(inp => inp.value || '');
+      const selects = Array.from(document.querySelectorAll('.csv-col-select'));
+      const column_to_feature = {};
+      selects.forEach(sel =>{
+        const v = sel.value;
+        const idx = sel.getAttribute('data-idx');
+        if(v){ column_to_feature[v] = feature_names[idx] || ('feature_' + idx); }
+      });
+      const payload = { model_name: model, feature_names: feature_names, column_to_feature: column_to_feature };
+      buildPreview(payload);
+      // store current preview payload for confirm step
+      window._pendingPreviewPayload = payload;
+    }
+
+    // Confirm and send payload stored in window._pendingPreviewPayload
+    async function confirmSaveFromPreview(){
+      const payload = window._pendingPreviewPayload || null;
+      if(!payload){ alert('Aucun mapping à sauvegarder.'); return; }
+      try{
+        const res = await fetch('/models/save-meta-ajax', {
+          method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
+        });
+        const js = await res.json();
+        if(js.success){
+          alert('Meta sauvegardé');
+          hidePreview();
+          loadModelMeta();
+        } else {
+          alert('Erreur sauvegarde: ' + (js.error||JSON.stringify(js)));
+        }
+      }catch(e){ alert('Erreur AJAX: '+e); }
+    }
+
+    // Gather mapping and POST via AJAX (legacy direct save without preview)
+    async function saveMetaAjax(){
+      const model = document.getElementById('model').value;
+      const featureInputs = Array.from(document.querySelectorAll('.feature-name-input'));
+      const feature_names = featureInputs.map(inp => inp.value || '');
+      const selects = Array.from(document.querySelectorAll('.csv-col-select'));
+      const column_to_feature = {};
+      selects.forEach(sel =>{
+        const v = sel.value;
+        const idx = sel.getAttribute('data-idx');
+        if(v){ column_to_feature[v] = feature_names[idx] || ('feature_' + idx); }
+      });
+
+      const payload = { model_name: model, feature_names: feature_names, column_to_feature: column_to_feature };
+      try{
+        const res = await fetch('/models/save-meta-ajax', {
+          method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
+        });
+        const js = await res.json();
+        if(js.success){
+          alert('Meta sauvegardé');
+          loadModelMeta();
+        } else {
+          alert('Erreur sauvegarde: ' + (js.error||JSON.stringify(js)));
+        }
+      }catch(e){ alert('Erreur AJAX: '+e); }
+    }
+
+    document.addEventListener('DOMContentLoaded', ()=>{
+      const sel = document.getElementById('model');
+      if(sel && sel.value) loadModelMeta();
+      document.getElementById('load-csv-columns-btn').addEventListener('click', (e)=>{ e.preventDefault(); loadCsvColumnsIntoSelects(); });
+      document.getElementById('autofill-mapping-btn').addEventListener('click', async (e)=>{ e.preventDefault(); await autofillMapping(); });
+      document.getElementById('save-meta-btn').addEventListener('click', (e)=>{ e.preventDefault(); showPreviewBeforeSave(); });
+      document.getElementById('confirm-save-btn').addEventListener('click', (e)=>{ e.preventDefault(); confirmSaveFromPreview(); });
+      document.getElementById('edit-mapping-btn').addEventListener('click', (e)=>{ e.preventDefault(); hidePreview(); });
+      // legacy direct save button still available
+      document.getElementById('save-meta-btn-fallback').addEventListener('click', (e)=>{});
+    });
+  </script>
+{% endblock %}

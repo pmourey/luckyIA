@@ -1,0 +1,41 @@
+{% extends 'layout.html' %}
+
+{% block title %}Entraîner un modèle - LuckyIA{% endblock %}
+
+{% block content %}
+  <h1>Entraîner un modèle</h1>
+
+  {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+  {% elif success %}
+    <div class="alert alert-success">Entraînement terminé. Modèle: <strong>{{ model_path }}</strong></div>
+    <h4>Historique (aperçu)</h4>
+    <pre>{{ history }}</pre>
+  {% endif %}
+
+  <form method="post" enctype="multipart/form-data">
+    <div class="mb-3">
+      <label for="datafile" class="form-label">Fichier CSV</label>
+      <input class="form-control" type="file" id="datafile" name="datafile" accept=".csv" required>
+    </div>
+
+    <div class="mb-3">
+      <label for="target_col" class="form-label">Colonne cible (par défaut 'risque')</label>
+      <input class="form-control" type="text" id="target_col" name="target_col" value="risque">
+    </div>
+
+    <div class="mb-3">
+      <label for="features" class="form-label">Colonnes de features (optionnel, séparées par des virgules)</label>
+      <input class="form-control" type="text" id="features" name="features" placeholder="age,revenu,anciennete,...">
+    </div>
+
+    <div class="mb-3">
+      <label for="epochs" class="form-label">Époques</label>
+      <input class="form-control" type="number" id="epochs" name="epochs" value="30">
+    </div>
+
+    <button class="btn btn-primary" type="submit">Lancer l'entraînement</button>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary">Retour</a>
+  </form>
+{% endblock %}
+
