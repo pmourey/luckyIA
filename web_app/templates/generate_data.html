@@ -9,6 +9,11 @@
     <div class="alert alert-danger">{{ error }}</div>
   {% elif success %}
     <div class="alert alert-success">Données générées: <strong>{{ csv_path }}</strong></div>
+    {% if csv_rel %}
+      <div class="mt-2">
+        <a href="{{ url_for('download_data', filename=csv_rel) }}" class="btn btn-success">Télécharger le CSV</a>
+      </div>
+    {% endif %}
   {% endif %}
 
   <form method="post">
@@ -24,4 +29,3 @@
     <a href="{{ url_for('index') }}" class="btn btn-secondary">Retour</a>
   </form>
 {% endblock %}
-

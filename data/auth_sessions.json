@@ -1,0 +1,51 @@
+[
+  {
+    "session_id": "test-session-0001",
+    "ip": "192.168.1.187",
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15",
+    "browser": "Safari",
+    "browser_version": "16.4",
+    "os": "macOS",
+    "os_version": "13.6",
+    "start_time": "2025-11-21T20:45:00+00:00",
+    "end_time": "2025-11-21T21:05:00+00:00",
+    "duration_seconds": 1200
+  },
+  {
+    "session_id": "test-session-0002",
+    "ip": "203.0.113.5",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0 Safari/537.36",
+    "browser": "Chrome",
+    "browser_version": "120.0.0",
+    "os": "Windows",
+    "os_version": "10",
+    "start_time": "2025-11-21T19:30:00+00:00",
+    "end_time": "2025-11-21T19:50:30+00:00",
+    "duration_seconds": 1230
+  },
+  {
+    "session_id": "test-session-active-0003",
+    "ip": "198.51.100.23",
+    "user_agent": "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/122.0",
+    "browser": "Firefox",
+    "browser_version": "122.0",
+    "os": "Linux",
+    "os_version": null,
+    "start_time": "2025-11-21T21:10:00+00:00",
+    "end_time": null,
+    "duration_seconds": null
+  },
+  {
+    "session_id": "test-session-0004",
+    "ip": "192.0.2.45",
+    "user_agent": "curl/7.86.0",
+    "browser": null,
+    "browser_version": null,
+    "os": null,
+    "os_version": null,
+    "start_time": "2025-11-20T08:00:00+00:00",
+    "end_time": "2025-11-20T08:10:00+00:00",
+    "duration_seconds": 600
+  }
+]
+

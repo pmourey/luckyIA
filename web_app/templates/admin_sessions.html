@@ -1,0 +1,105 @@
+{% extends 'layout.html' %}
+
+{% block title %}Administration - Sessions{% endblock %}
+
+{% block content %}
+  <h1>Historique des connexions</h1>
+  <p class="text-muted small">Affiche les sessions utilisateurs: IP, heure de début/fin, durée, navigateur et OS.</p>
+
+  {# If user is not admin, show an access denied message and stop rendering the table #}
+  {% if not is_admin %}
+    <div class="alert alert-danger" role="alert">
+      Accès réservé aux administrateurs.
+      {% if not logged_in %}
+        <div>Veuillez vous <a href="{{ url_for('login', next=url_for('admin_sessions')) }}">connecter</a> avec un compte administrateur pour accéder à cette page.</div>
+      {% else %}
+        <div>Votre compte ne dispose pas des droits administrateur. Retourner à <a href="{{ url_for('index') }}">l'accueil</a>.</div>
+      {% endif %}
+    </div>
+  {% else %}
+
+  <form class="row g-2 mb-3" method="get" action="{{ url_for('admin_sessions') }}">
+    <div class="col-auto">
+      <input type="text" name="q" value="{{ q or '' }}" class="form-control" placeholder="Rechercher IP, navigateur, OS, session id...">
+    </div>
+    <div class="col-auto">
+      <select name="per_page" class="form-select">
+        {% for opt in [10,20,50,100] %}
+          <option value="{{ opt }}" {% if pagination and pagination.per_page==opt %}selected{% endif %}>{{ opt }} / page</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-auto">
+      <button class="btn btn-primary" type="submit">Filtrer</button>
+      <a class="btn btn-secondary" href="{{ url_for('admin_sessions') }}">Réinitialiser</a>
+    </div>
+  </form>
+
+  {% if pagination %}
+    <div class="mb-2 small text-muted">Total: {{ pagination.total }} — Page {{ pagination.page }} / {{ pagination.total_pages }}</div>
+  {% endif %}
+
+  {% if sessions and sessions|length > 0 %}
+    <div class="table-responsive">
+      <table class="table table-sm table-striped">
+        <thead>
+          <tr>
+            <th>Début</th>
+            <th>Fin</th>
+            <th>Durée (s)</th>
+            <th>Statut</th>
+            <th>IP</th>
+            <th>Navigateur</th>
+            <th>OS</th>
+            <th>User-Agent</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in sessions %}
+            <tr {% if s.end_time is none %}class="table-success"{% endif %}>
+              <td>{{ s.start_time or '-' }}</td>
+              <td>{{ s.end_time or '-' }}</td>
+              <td>{{ s.duration_seconds or '-' }}</td>
+              <td>
+                {% if s.end_time is none %}
+                  <span class="badge bg-success">Active</span>
+                {% else %}
+                  <span class="badge bg-secondary">Fermée</span>
+                {% endif %}
+              </td>
+              <td>{{ s.ip or '-' }}</td>
+              <td>{% if s.browser %}{{ s.browser }}{% if s.browser_version %} {{ s.browser_version }}{% endif %}{% else %}-{% endif %}</td>
+              <td>{% if s.os %}{{ s.os }}{% if s.os_version %} {{ s.os_version }}{% endif %}{% else %}-{% endif %}</td>
+              <td><small>{{ s.user_agent }}</small></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <nav aria-label="Pagination">
+      <ul class="pagination">
+        <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+          <a class="page-link" href="{{ url_for('admin_sessions', page=pagination.page-1, per_page=pagination.per_page, q=q) }}">&laquo; Précédent</a>
+        </li>
+
+        {# compute a safe start/end without using max/min #}
+        {% set start = 1 if (pagination.page - 2) < 1 else (pagination.page - 2) %}
+        {% set end = pagination.total_pages if (pagination.page + 2) > pagination.total_pages else (pagination.page + 2) %}
+        {% for p in range(start, end+1) %}
+          <li class="page-item {% if p==pagination.page %}active{% endif %}"><a class="page-link" href="{{ url_for('admin_sessions', page=p, per_page=pagination.per_page, q=q) }}">{{ p }}</a></li>
+        {% endfor %}
+
+        <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+          <a class="page-link" href="{{ url_for('admin_sessions', page=pagination.page+1, per_page=pagination.per_page, q=q) }}">Suivant &raquo;</a>
+        </li>
+      </ul>
+    </nav>
+
+  {% else %}
+    <div class="alert alert-info">Aucune session enregistrée.</div>
+  {% endif %}
+
+  {% endif %}
+
+{% endblock %}

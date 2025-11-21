@@ -1,0 +1,44 @@
+{% extends 'layout.html' %}
+
+{% block title %}Prédiction - LuckyIA{% endblock %}
+
+{% block content %}
+  <h1>Prédiction</h1>
+  <p>Téléversez un fichier CSV et choisissez un modèle pour obtenir des prédictions.</p>
+
+  <div class="row">
+    <div class="col-md-8">
+      <form id="predict-form" action="{{ url_for('predict') }}" method="post" enctype="multipart/form-data">
+        <div class="mb-3">
+          <label for="datafile" class="form-label">Fichier CSV</label>
+          <input class="form-control" type="file" id="datafile" name="datafile" accept=".csv" required>
+        </div>
+
+        <div class="mb-3">
+          <label for="model" class="form-label">Choisir un modèle</label>
+          <select class="form-select" id="model" name="model" required>
+            {% if models %}
+              {% for m in models %}
+                <option value="{{ m.name if m is mapping else m }}">{{ m.name if m is mapping else m }}</option>
+              {% endfor %}
+            {% else %}
+              <option disabled>Aucun modèle trouvé dans le dossier models/</option>
+            {% endif %}
+          </select>
+        </div>
+
+        <button class="btn btn-primary" type="submit">Lancer la prédiction</button>
+      </form>
+    </div>
+
+    <div class="col-md-4">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title">Aide rapide</h5>
+          <p class="card-text small">Le CSV doit contenir uniquement les features (sans la colonne cible `risque`). L'application tente de détecter et supprimer automatiquement la colonne cible si elle est présente.</p>
+          <a href="{{ url_for('index') }}" class="btn btn-sm btn-secondary">Retour</a>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

@@ -80,9 +80,11 @@ def generate_sample_data(output_path=None, n_samples=1000, random_state=42):
             0.1 * np.random.random(n_samples)
         ).clip(0, 1)
 
-    # Chemin par défaut
+    # Chemin par défaut : utiliser la racine du projet pour que l'emplacement soit montable en Docker
     if output_path is None:
-        output_path = Path(__file__).parent.parent / 'data' / 'raw' / 'client_data.csv'
+        # __file__ = ai_module/examples/generate.py -> parents[2] = project root
+        project_root = Path(__file__).resolve().parents[2]
+        output_path = project_root / 'data' / 'raw' / 'client_data.csv'
     else:
         output_path = Path(output_path)
 
@@ -109,8 +111,9 @@ def generate_demo_models(root=None):
     Returns:
         dict avec chemins créés
     """
+    # Par défaut, choisir la racine du projet (parents[2]) pour écrire dans /models et /data
     if root is None:
-        root = Path(__file__).parent.parent
+        root = Path(__file__).resolve().parents[2]
     else:
         root = Path(root)
 
