@@ -24,6 +24,238 @@ except Exception:
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET', 'dev-secret')
+
+# Load simple .env file from project root if present (compatible fallback, no dependency)
+def _load_dotenv(path=None):
+    try:
+        if path is None:
+            path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+        if not os.path.isfile(path):
+            return
+        with open(path, 'r', encoding='utf-8') as f:
+            for ln in f:
+                ln = ln.strip()
+                if not ln or ln.startswith('#'):
+                    continue
+                if '=' not in ln:
+                    continue
+                k, v = ln.split('=', 1)
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                # don't override existing environment
+                if k not in os.environ:
+                    os.environ[k] = v
+    except Exception:
+        pass
+
+_load_dotenv()
+
+# Prepare authentication passwords — support AUTH_PASSWORDS (comma-separated) and a separate ADMIN_PASSWORD
+# Read AUTH_PASSWORDS (may be comma-separated list) — do NOT fall back to ADMIN_PASSWORD here.
+_auth_passwords_raw = os.environ.get('AUTH_PASSWORDS') or ''
+# Keep ADMIN raw value separately for admin-checks (may be a bcrypt hash or plain)
+_ADMIN_RAW = os.environ.get('ADMIN_PASSWORD')
+
+# Build the list of configured auth passwords (from AUTH_PASSWORDS only)
+if _auth_passwords_raw:
+    raw = [p.strip() for p in _auth_passwords_raw.split(',') if p.strip()]
+else:
+    raw = []
+
+# Separate plain and hashed (bcrypt) entries from the AUTH_PASSWORDS list
+_plain_passwords = [p for p in raw if not (p.startswith('$2a$') or p.startswith('$2b$') or p.startswith('$2y$'))]
+_hashed_passwords = [p for p in raw if (p.startswith('$2a$') or p.startswith('$2b$') or p.startswith('$2y$'))]
+
+# Whether authentication is enabled: enabled if either AUTH_PASSWORDS provided or ADMIN_PASSWORD provided
+AUTH_ENABLED = bool(raw or _ADMIN_RAW)
+
+from functools import wraps
+from flask import session
+
+# Helper to check admin password
+def _is_admin_password(plaintext: str) -> (bool, str):
+    """Return (True, None) if plaintext matches ADMIN_PASSWORD, (False, None) otherwise.
+    If bcrypt is required but not installed, returns (False, error_message).
+    """
+    if not _ADMIN_RAW:
+        return False, None
+    # plain vs bcrypt
+    if _ADMIN_RAW.startswith('$2a$') or _ADMIN_RAW.startswith('$2b$') or _ADMIN_RAW.startswith('$2y$'):
+        try:
+            import bcrypt
+        except Exception:
+            return False, 'Server misconfiguration: bcrypt not installed but ADMIN_PASSWORD is a bcrypt hash.'
+        try:
+            if bcrypt.checkpw(plaintext.encode('utf-8'), _ADMIN_RAW.encode('utf-8')):
+                return True, None
+            return False, None
+        except Exception:
+            return False, None
+    else:
+        # plain compare
+        return (plaintext == _ADMIN_RAW), None
+
+# Decorator to protect routes; defined early so it's available for decorators later
+def login_required(f):
+    @wraps(f)
+    def _wrapped(*args, **kwargs):
+        if not AUTH_ENABLED:
+            return f(*args, **kwargs)
+        if session.get('logged_in'):
+            return f(*args, **kwargs)
+        from flask import redirect, request
+        return redirect(url_for('login', next=request.path))
+    return _wrapped
+
+
+def _verify_password(plaintext: str) -> (bool, str):
+    """Verify provided plaintext password against configured passwords.
+    Returns (True, None) if ok, or (False, error_message) if not. If bcrypt is required but not installed, returns error message explaining.
+    """
+    # Check plain passwords first
+    for p in _plain_passwords:
+        if plaintext == p:
+            return True, None
+
+    # If hashed passwords present, try bcrypt (lazy import)
+    if _hashed_passwords:
+        try:
+            import bcrypt
+        except Exception:
+            return False, 'Server misconfiguration: bcrypt not installed but hashed passwords are configured. Install "bcrypt" package.'
+        try:
+            pb = plaintext.encode('utf-8')
+            for h in _hashed_passwords:
+                try:
+                    if bcrypt.checkpw(pb, h.encode('utf-8')):
+                        return True, None
+                except Exception:
+                    # ignore malformed hash
+                    continue
+        except Exception:
+            return False, 'Erreur durant la vérification du mot de passe.'
+
+    return False, None
+
+# Login route
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if not AUTH_ENABLED:
+        # auth not enabled - inform user
+        return render_template('login.html', disabled=True)
+    if request.method == 'POST':
+        pwd = request.form.get('password', '')
+        nxt = request.args.get('next') or request.form.get('next') or url_for('index')
+
+        # First, verify against AUTH_PASSWORDS
+        ok, err = _verify_password(pwd)
+        if err:
+            # _verify_password may return an explanatory error (e.g., bcrypt not installed)
+            flash(err, 'danger')
+            return render_template('login.html', next=nxt)
+
+        admin_matched = False
+        if not ok:
+            # If not matched by AUTH_PASSWORDS, allow ADMIN_PASSWORD to authenticate
+            try:
+                is_admin, admin_err = _is_admin_password(pwd)
+                if admin_err:
+                    flash(admin_err, 'danger')
+                    return render_template('login.html', next=nxt)
+                if is_admin:
+                    ok = True
+                    admin_matched = True
+            except Exception:
+                # fallback: do not authenticate
+                ok = False
+        else:
+            # If AUTH_PASSWORDS matched, additionally check whether this is the admin password
+            try:
+                is_admin, _ = _is_admin_password(pwd)
+                if is_admin:
+                    admin_matched = True
+            except Exception:
+                admin_matched = False
+
+        if not ok:
+            flash('Mot de passe invalide', 'danger')
+            return render_template('login.html', next=nxt)
+
+        # success: set session and is_admin flag
+        session['logged_in'] = True
+        if admin_matched:
+            session['is_admin'] = True
+        else:
+            session.pop('is_admin', None)
+
+        # assign a session id and record login event
+        try:
+            import uuid
+            sid = str(uuid.uuid4())
+            session['session_id'] = sid
+            _record_login(sid, request.remote_addr, request.headers.get('User-Agent', ''))
+        except Exception:
+            app.logger.debug('Failed to record login event')
+        flash('Connecté')
+        return redirect(nxt)
+    # GET
+    next_param = request.args.get('next') or url_for('index')
+    return render_template('login.html', next=next_param)
+
+# Logout route
+@app.route('/logout')
+def logout():
+    # mark session end if possible
+    try:
+        sid = session.get('session_id')
+        if sid:
+            _record_logout(sid)
+    except Exception:
+        app.logger.debug('Failed to record logout event')
+    session.pop('logged_in', None)
+    session.pop('is_admin', None)
+    session.pop('session_id', None)
+    flash('Déconnecté')
+    return redirect(url_for('index'))
+
+# Enforce authentication globally (except login and static files) when enabled
+@app.before_request
+def enforce_authentication():
+    # If auth not enabled, do nothing
+    if not AUTH_ENABLED:
+        return None
+    # Allow login page and static assets and favicon
+    path = request.path or ''
+    endpoint = request.endpoint or ''
+    if endpoint == 'login' or path.startswith('/static') or path == '/favicon.ico':
+        return None
+    # Allow logout endpoint so users can logout without being redirected
+    if endpoint == 'logout':
+        return None
+    # If user already logged in, allow
+    if session.get('logged_in'):
+        return None
+    # Otherwise redirect to login with next parameter
+    return redirect(url_for('login', next=path))
+
+# Inject GitHub repo URL into all templates (optional). Set environment variable GITHUB_REPO_URL to enable.
+@app.context_processor
+def inject_github_repo():
+    try:
+        return dict(github_repo_url=os.environ.get('GITHUB_REPO_URL', 'https://github.com/pmourey/luckyIA/tree/copilot/create-ai-module-python'))
+    except Exception:
+        return dict(github_repo_url='')
+
+@app.context_processor
+def inject_auth_state():
+    try:
+        # Provide a boolean indicating whether the admin endpoint is registered.
+        # Avoid calling url_for here (can raise BuildError in some import/test contexts).
+        admin_enabled = 'admin_sessions' in app.view_functions
+        return dict(auth_enabled=AUTH_ENABLED, logged_in=bool(session.get('logged_in')), admin_enabled=admin_enabled, is_admin=bool(session.get('is_admin')))
+    except Exception:
+        return dict(auth_enabled=False, logged_in=False, admin_enabled=False, is_admin=False)
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # models folder is at project root 'models'
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
@@ -211,6 +443,13 @@ def load_model_file(model_path):
 def index():
 	models = list_models()
 	return render_template('index.html', models=models)
+
+
+@app.route('/predict-page', methods=['GET'])
+def predict_page():
+    """Page dédiée pour téléverser un CSV et lancer une prédiction (formulaire POST sur /predict)."""
+    models = list_models()
+    return render_template('predict.html', models=models)
 
 
 @app.route('/predict', methods=['POST'])
@@ -501,12 +740,42 @@ def generate_data():
 			# Appeler la fonction de génération
 			csv_path = ai_examples.generate_sample_data(output_path=None, n_samples=n_samples, random_state=random_seed)
 			# csv_path est un Path ou string
-			return render_template('generate_data.html', success=True, csv_path=str(csv_path))
+			# Calculer le chemin relatif sous le dossier data/ (ex: raw/client_data.csv)
+			try:
+				from pathlib import Path
+				project_data_dir = Path(PROJECT_ROOT) / 'data'
+				csv_path = Path(csv_path)
+				# chemin relatif par rapport à data/ (ex: raw/client_data.csv)
+				csv_rel = str(csv_path.relative_to(project_data_dir))
+			except Exception:
+				# fallback: transmettre le nom de fichier
+				csv_rel = os.path.basename(str(csv_path))
+
+			return render_template('generate_data.html', success=True, csv_path=str(csv_path), csv_rel=csv_rel)
 
 		except Exception as e:
 			return render_template('generate_data.html', error=f"Erreur lors de la génération des données: {e}")
 
 	return render_template('generate_data.html')
+
+
+@app.route('/download-data/<path:filename>', methods=['GET'])
+def download_data(filename):
+    """Permet à l'utilisateur de télécharger un fichier à partir du dossier data/ du projet.
+    Le paramètre filename est relatif à PROJECT_ROOT/data/ (ex: 'raw/client_data.csv').
+    """
+    try:
+        # sanitize
+        safe = os.path.normpath(filename)
+        # Prevent path traversal outside data dir
+        data_dir = os.path.join(PROJECT_ROOT, 'data')
+        full = os.path.join(data_dir, safe)
+        if not os.path.isfile(full):
+            return Response('Fichier non trouvé', status=404)
+        # send as attachment
+        return send_from_directory(data_dir, safe, as_attachment=True)
+    except Exception as e:
+        return Response(str(e), status=500)
 
 
 @app.route('/generate-model', methods=['GET', 'POST'])
@@ -1204,3 +1473,243 @@ def _save_detected_target_in_meta(model_filename: str, detected_cols: list):
 if __name__ == '__main__':
 	# logging.basicConfig(level=logging.DEBUG)
 	app.run(host='0.0.0.0', port=7000, debug=True)
+
+# Sessions logging utilities
+def _sessions_file_path():
+    try:
+        data_dir = os.path.join(PROJECT_ROOT, 'data')
+        os.makedirs(data_dir, exist_ok=True)
+        return os.path.join(data_dir, 'auth_sessions.json')
+    except Exception:
+        return os.path.join(PROJECT_ROOT, 'auth_sessions.json')
+
+
+def _load_sessions():
+    path = _sessions_file_path()
+    try:
+        if os.path.isfile(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        app.logger.debug('Failed to load sessions file')
+    return []
+
+
+def _write_sessions(sessions):
+    path = _sessions_file_path()
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(sessions, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        app.logger.error(f'Failed to write sessions file: {e}')
+
+
+def _parse_user_agent(ua_string: str):
+    """Try to extract browser+version and os+version from a user-agent string.
+    Falls back to returning raw UA when parsing library not available.
+    """
+    if not ua_string:
+        return {'browser': None, 'browser_version': None, 'os': None, 'os_version': None, 'raw': ''}
+
+    # Try to use user_agents library if available
+    try:
+        from user_agents import parse as ua_parse
+        ua = ua_parse(ua_string)
+        browser = ua.browser.family
+        browser_version = '.'.join([str(x) for x in ua.browser.version if x is not None]) if ua.browser.version else None
+        os_name = ua.os.family
+        os_version = '.'.join([str(x) for x in ua.os.version if x is not None]) if ua.os.version else None
+        return {'browser': browser, 'browser_version': browser_version, 'os': os_name, 'os_version': os_version, 'raw': ua_string}
+    except Exception:
+        pass
+
+    # Lightweight parsing fallback
+    b = None; bv = None; osn = None; osv = None
+    ua = ua_string
+    # browsers
+    m = re.search(r'Chrome/([0-9\.]+)', ua)
+    if m:
+        b = 'Chrome'; bv = m.group(1)
+    m = re.search(r'Firefox/([0-9\.]+)', ua)
+    if m and not b:
+        b = 'Firefox'; bv = m.group(1)
+    m = re.search(r'OPR/([0-9\.]+)', ua)
+    if m and not b:
+        b = 'Opera'; bv = m.group(1)
+    m = re.search(r'Edg/([0-9\.]+)', ua)
+    if m and not b:
+        b = 'Edge'; bv = m.group(1)
+    m = re.search(r'Version/([0-9\.]+).*Safari/', ua)
+    if m and not b and 'Safari' in ua:
+        b = 'Safari'; bv = m.group(1)
+
+    # os
+    if 'Windows' in ua:
+        osn = 'Windows'
+        m = re.search(r'Windows NT ([0-9\.]+)', ua)
+        if m: osv = m.group(1)
+    elif 'Mac OS X' in ua or 'Macintosh' in ua:
+        osn = 'macOS'
+        m = re.search(r'Mac OS X ([0-9_\.]+)', ua)
+        if m: osv = m.group(1).replace('_', '.')
+    elif 'Android' in ua:
+        osn = 'Android'
+        m = re.search(r'Android ([0-9\.]+)', ua)
+        if m: osv = m.group(1)
+    elif 'iPhone OS' in ua or 'iPad' in ua:
+        osn = 'iOS'
+        m = re.search(r'OS ([0-9_]+)', ua)
+        if m: osv = m.group(1).replace('_', '.')
+    elif 'Linux' in ua:
+        osn = 'Linux'
+
+    return {'browser': b, 'browser_version': bv, 'os': osn, 'os_version': osv, 'raw': ua_string}
+
+
+def _record_login(session_id, ip, user_agent):
+    """Append a login session entry and persist."""
+    try:
+        sessions = _load_sessions()
+        parsed = _parse_user_agent(user_agent)
+        entry = {
+            'session_id': session_id,
+            'ip': ip,
+            'user_agent': parsed.get('raw'),
+            'browser': parsed.get('browser'),
+            'browser_version': parsed.get('browser_version'),
+            'os': parsed.get('os'),
+            'os_version': parsed.get('os_version'),
+            'start_time': datetime.now(timezone.utc).isoformat(),
+            'end_time': None,
+            'duration_seconds': None
+        }
+        sessions.append(entry)
+        _write_sessions(sessions)
+    except Exception as e:
+        app.logger.debug(f'Failed to append login session: {e}')
+
+
+def _record_logout(session_id):
+    """Mark session end_time and duration for session_id."""
+    try:
+        sessions = _load_sessions()
+        updated = False
+        for s in reversed(sessions):
+            if s.get('session_id') == session_id and s.get('end_time') is None:
+                end = datetime.now(timezone.utc)
+                s['end_time'] = end.isoformat()
+                try:
+                    start = datetime.fromisoformat(s['start_time'])
+                    s['duration_seconds'] = (end - start).total_seconds()
+                except Exception:
+                    s['duration_seconds'] = None
+                updated = True
+                break
+        if updated:
+            _write_sessions(sessions)
+    except Exception as e:
+        app.logger.debug(f'Failed to record logout: {e}')
+
+
+# Admin page for sessions
+@app.route('/admin/sessions', methods=['GET'])
+@login_required
+def admin_sessions():
+    try:
+        sessions = _load_sessions()
+    except Exception:
+        sessions = []
+    # sort by start_time desc
+    try:
+        sessions = sorted(sessions, key=lambda x: x.get('start_time') or '', reverse=True)
+    except Exception:
+        pass
+
+    # Pagination & search
+    try:
+        page = int(request.args.get('page', 1))
+    except Exception:
+        page = 1
+    try:
+        per_page = int(request.args.get('per_page', 20))
+    except Exception:
+        per_page = 20
+    # cap per_page
+    if per_page <= 0:
+        per_page = 20
+    if per_page > 200:
+        per_page = 200
+
+    q = (request.args.get('q') or '').strip()
+    if q:
+        q_lower = q.lower()
+        def matches(s):
+            for field in ('ip', 'browser', 'os', 'user_agent', 'session_id'):
+                v = s.get(field)
+                if v and q_lower in str(v).lower():
+                    return True
+            # also search start_time/end_time
+            if s.get('start_time') and q_lower in s.get('start_time').lower():
+                return True
+            if s.get('end_time') and q_lower in s.get('end_time').lower():
+                return True
+            return False
+        sessions = [s for s in sessions if matches(s)]
+
+    total = len(sessions)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    if page < 1:
+        page = 1
+    if page > total_pages:
+        page = total_pages
+
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    page_items = sessions[start_idx:end_idx]
+
+    pagination = {
+        'page': page,
+        'per_page': per_page,
+        'total': total,
+        'total_pages': total_pages,
+        'has_prev': page > 1,
+        'has_next': page < total_pages
+    }
+
+    return render_template('admin_sessions.html', sessions=page_items, pagination=pagination, q=q)
+
+@app.route('/debug/session-info', methods=['GET'])
+def debug_session_info():
+    """Debug endpoint (local-only) returning current session state and relevant env flags.
+    Accessible only from localhost (127.0.0.1 / ::1).
+    """
+    try:
+        # restrict to localhost
+        addr = request.remote_addr or ''
+        if addr not in ('127.0.0.1', '::1', 'localhost'):
+            return Response('Forbidden', status=403)
+        # build safe summary
+        info = {
+            'session_keys': list(session.keys()),
+            'session': {k: str(v) for k, v in session.items()},
+            'AUTH_ENABLED': AUTH_ENABLED,
+            'ADMIN_PASSWORD_present': bool(_ADMIN_RAW),
+            'AUTH_passwords_count': len(_plain_passwords) + len(_hashed_passwords),
+            'registered_admin_endpoint': 'admin_sessions' in app.view_functions
+        }
+        return jsonify(info), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# Compatibility aliases: accept trailing slash and /admin root
+@app.route('/admin/sessions/', methods=['GET'])
+@login_required
+def admin_sessions_slash():
+    """Alias that delegates to admin_sessions to tolerate trailing slash."""
+    return admin_sessions()
+
+@app.route('/admin', methods=['GET'])
+@login_required
+def admin_root_redirect():
+    """Redirect /admin to the admin sessions page."""
+    return redirect(url_for('admin_sessions'))
