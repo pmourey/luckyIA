@@ -1,0 +1,82 @@
+{% extends 'layout.html' %}
+
+{% block title %}Models - LuckyIA{% endblock %}
+
+{% block content %}
+  <h1>Modèles disponibles</h1>
+
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      {% for msg in messages %}
+        <div class="alert alert-info">{{ msg }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  {% if models %}
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Nom</th>
+          <th>Type</th>
+          <th>Entrée attendue</th>
+          <th>Noms de features</th>
+          <th>Note</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in models %}
+          <tr>
+            <td>{{ m.name }}</td>
+            <td>{{ m.kind }}</td>
+            <td>{{ m.expected_input_dim or '-' }}</td>
+            <td>
+              {% if m.feature_names %}
+                {{ m.feature_names | join(', ') }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td>{{ m.note or '' }}</td>
+            <td>
+              {% if m.kind == 'torch_state_dict' %}
+                <form method="post" action="{{ url_for('convert_model_route') }}" style="display:inline">
+                  <input type="hidden" name="model" value="{{ m.name }}">
+                  <button class="btn btn-sm btn-primary" type="submit">Convertir en .pt</button>
+                </form>
+              {% endif %}
+              <a class="btn btn-sm btn-secondary" href="{{ url_for('download_model', filename=m.name) }}" target="_blank">Télécharger</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>Aucun modèle trouvé.</p>
+  {% endif %}
+
+  <h2 class="mt-4">Historique des conversions</h2>
+  {% if history and history|length > 0 %}
+    <table class="table table-sm">
+      <thead><tr><th>Date UTC</th><th>Source</th><th>Output</th><th>Méthode</th><th>Note</th></tr></thead>
+      <tbody>
+        {% for h in history|reverse %}
+          <tr>
+            <td>{{ h.timestamp }}</td>
+            <td>{{ h.source }}</td>
+            <td>
+              <a href="{{ url_for('download_model', filename=h.output) }}">{{ h.output }}</a>
+            </td>
+            <td>{{ h.method }}</td>
+            <td>{{ h.note or '' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>Aucune conversion enregistrée.</p>
+  {% endif %}
+
+  <a href="{{ url_for('index') }}" class="btn btn-secondary mt-3">Retour</a>
+{% endblock %}

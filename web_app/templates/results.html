@@ -1,0 +1,18 @@
+{% extends 'layout.html' %}
+
+{% block title %}Résultats - LuckyIA{% endblock %}
+
+{% block content %}
+  <h1>Résultats</h1>
+  {% if error %}
+    <div class="alert alert-danger" role="alert">{{ error }}</div>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary">Retour</a>
+  {% else %}
+    {% if warning %}
+      <div class="alert alert-warning" role="alert">{{ warning }}</div>
+    {% endif %}
+    <p>Modèle utilisé : <strong>{{ model }}</strong></p>
+    <div class="table-responsive mt-3">{{ table_html | safe }}</div>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary mt-3">Retour</a>
+  {% endif %}
+{% endblock %}

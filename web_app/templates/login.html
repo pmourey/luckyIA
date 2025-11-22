@@ -1,0 +1,22 @@
+{% extends 'layout.html' %}
+
+{% block title %}Connexion - LuckyIA{% endblock %}
+
+{% block content %}
+  <h1>Connexion</h1>
+  {% if disabled %}
+    <div class="alert alert-info">L'authentification est désactivée sur ce déploiement.</div>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary">Retour</a>
+  {% else %}
+    <form method="post">
+      <div class="mb-3">
+        <label for="password" class="form-label">Mot de passe</label>
+        <input id="password" name="password" type="password" class="form-control" required autofocus>
+      </div>
+      <input type="hidden" name="next" value="{{ next }}">
+      <button class="btn btn-primary" type="submit">Se connecter</button>
+      <a href="{{ url_for('index') }}" class="btn btn-secondary">Annuler</a>
+    </form>
+  {% endif %}
+{% endblock %}
+
